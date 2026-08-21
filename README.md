@@ -60,10 +60,13 @@ cd utm-studio
 ./build_app.sh
 ```
 
-This produces `dist/UTM Studio.app`, versioned from the nearest git tag
-automatically (see [`DEVELOPMENT.md`](DEVELOPMENT.md#versioning--releases)).
-Drag it to `/Applications` and launch it (right-click → Open the first time,
-since it isn't notarized).
+This produces `dist/UTM Studio.app` and `dist/UTM Studio-<version>.dmg`,
+versioned from the nearest git tag automatically (see
+[`DEVELOPMENT.md`](DEVELOPMENT.md#versioning--releases)). Drag the app to
+`/Applications` and launch it (right-click → Open the first time, since a
+plain build isn't notarized — see
+[`DEVELOPMENT.md`](DEVELOPMENT.md#signing--notarization) for producing a
+signed, notarized `.dmg` that skips that step entirely).
 
 You can also open `Package.swift` in Xcode and hit Run directly, for
 development.

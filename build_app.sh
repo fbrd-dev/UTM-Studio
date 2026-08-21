@@ -1,12 +1,35 @@
 #!/bin/bash
 # Builds UTM Studio.app — a double-clickable bundle you can drag to
 # /Applications. Re-run this any time you change the Swift sources.
+#
+# Plain `./build_app.sh` ad-hoc signs, same as always — fine for local use
+# and AirDropping between your own Macs, but Gatekeeper will still warn
+# other people (right-click > Open needed) since it's not from an
+# identified developer.
+#
+# For a signed, notarized .dmg other people can just download and open
+# with no warning, set these two environment variables (see
+# DEVELOPMENT.md#signing--notarization for the one-time setup they depend
+# on — an Apple Developer Program membership, a Developer ID Application
+# certificate, and stored notarytool credentials):
+#
+#   SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+#   NOTARY_PROFILE="your-stored-notarytool-profile-name" \
+#   ./build_app.sh
+#
+# With both set, this signs with that identity instead of ad-hoc, submits
+# the app for notarization and staples the ticket, builds a .dmg, then
+# notarizes and staples the .dmg too (Gatekeeper checks the disk image
+# itself, not just the app inside it, once it's carried a quarantine flag
+# from a browser download).
 set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="UTM Studio"
 BUILD_DIR=".build/release"
 APP_DIR="dist/${APP_NAME}.app"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 
 # UTM Studio is Apple Silicon-only by design (see App.swift's arch(arm64)
 # gate) — refuse to even attempt a build on an Intel machine rather than
@@ -75,7 +98,8 @@ if [ -n "$GIT_VERSION" ]; then
   plutil -replace CFBundleVersion -string "$APP_VERSION" "$APP_DIR/Contents/Info.plist"
   echo "==> Version: $APP_VERSION (from git tag)"
 else
-  echo "==> Version: $(plutil -extract CFBundleShortVersionString raw Info.plist) (no git tag found, using Info.plist default)"
+  APP_VERSION="$(plutil -extract CFBundleShortVersionString raw Info.plist)"
+  echo "==> Version: $APP_VERSION (no git tag found, using Info.plist default)"
 fi
 
 echo "==> Generating app icon..."
@@ -83,8 +107,19 @@ ICONSET_DIR=$(mktemp -d)/AppIcon.iconset
 swift generate_icon.swift "$ICONSET_DIR" >/dev/null
 iconutil -c icns "$ICONSET_DIR" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
 
-echo "==> Ad-hoc signing..."
-codesign --force --deep --sign - "$APP_DIR" 2>&1 | grep -v "replacing existing signature" || true
+if [ -n "$SIGNING_IDENTITY" ]; then
+  echo "==> Signing with Developer ID ($SIGNING_IDENTITY)..."
+  # --options runtime (hardened runtime) and --timestamp (secure timestamp)
+  # are both required for notarization to accept the signature at all —
+  # ad-hoc signing below skips them since a plain "-" identity can't
+  # produce a valid secure timestamp anyway.
+  codesign --force --deep --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP_DIR"
+else
+  echo "==> Ad-hoc signing (no SIGNING_IDENTITY set — this build will show"
+  echo "    Gatekeeper warnings for anyone but you; see DEVELOPMENT.md for"
+  echo "    real signing/notarization setup)..."
+  codesign --force --deep --sign - "$APP_DIR" 2>&1 | grep -v "replacing existing signature" || true
+fi
 
 # Rebuilding at the same path repeatedly (same bundle ID, same location) can
 # leave Finder showing a stale cached icon from an earlier build, even
@@ -98,10 +133,52 @@ if [ -x "$LSREGISTER" ]; then
 fi
 touch "$APP_DIR"
 
+notarize() {
+  local target="$1"
+  echo "==> Submitting $(basename "$target") for notarization (this can take a few minutes)..."
+  xcrun notarytool submit "$target" --keychain-profile "$NOTARY_PROFILE" --wait
+  echo "==> Stapling notarization ticket to $(basename "$target")..."
+  xcrun stapler staple "$target"
+}
+
+if [ -n "$SIGNING_IDENTITY" ] && [ -n "$NOTARY_PROFILE" ]; then
+  ZIP_PATH="$(mktemp -d)/${APP_NAME}.zip"
+  # notarytool only accepts a zip/dmg/pkg, not a raw .app — ditto's -c -k
+  # --keepParent preserves the bundle structure notarization needs to see.
+  ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
+  notarize "$ZIP_PATH"
+  rm -f "$ZIP_PATH"
+elif [ -n "$SIGNING_IDENTITY" ]; then
+  echo "==> SIGNING_IDENTITY set but NOTARY_PROFILE isn't — skipping notarization."
+  echo "    The app is properly signed but will still show a Gatekeeper warning"
+  echo "    for anyone but you until it's notarized too."
+fi
+
+echo "==> Creating disk image..."
+DMG_PATH="dist/${APP_NAME}-${APP_VERSION}.dmg"
+rm -f "$DMG_PATH"
+DMG_STAGING="$(mktemp -d)/dmg"
+mkdir -p "$DMG_STAGING"
+cp -R "$APP_DIR" "$DMG_STAGING/"
+ln -s /Applications "$DMG_STAGING/Applications"
+hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_PATH" >/dev/null
+rm -rf "$(dirname "$DMG_STAGING")"
+
+if [ -n "$SIGNING_IDENTITY" ] && [ -n "$NOTARY_PROFILE" ]; then
+  notarize "$DMG_PATH"
+fi
+
 echo ""
 echo "Done: $APP_DIR"
-echo "Drag it to /Applications, then launch it (right-click > Open the first"
-echo "time, since it isn't notarized)."
+if [ -n "$SIGNING_IDENTITY" ] && [ -n "$NOTARY_PROFILE" ]; then
+  echo "Signed, notarized, and stapled: $DMG_PATH"
+  echo "Anyone can download and open this — no Gatekeeper warning, no"
+  echo "right-click bypass needed."
+else
+  echo "Also built: $DMG_PATH (not notarized — see the note above)."
+  echo "Drag the .app to /Applications, then launch it (right-click > Open"
+  echo "the first time, since it isn't notarized)."
+fi
 echo "If Finder still shows a generic/blank icon, that's LaunchServices'"
 echo "icon cache lagging, not a broken build — moving the app (e.g. into"
 echo "/Applications) or relaunching Finder (killall Finder) clears it."

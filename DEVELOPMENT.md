@@ -36,6 +36,68 @@ exist to show anything if that window isn't open. It's deliberately not a
 self-updater (no auto-download-and-replace) — see "Why not auto-update"
 below for the reasoning.
 
+## Signing & notarization
+
+Plain `./build_app.sh` ad-hoc signs (`codesign --sign -`), which is fine for
+running the app yourself or AirDropping it between your own Macs, but
+Gatekeeper still warns anyone else who opens it (they need the right-click
+> Open bypass), since it's not from an identified developer. Getting to a
+`.dmg` other people can just download and open with no warning needs a
+one-time setup, then one command per release after that.
+
+**One-time setup** (all of this is tied to your own Apple ID/company —
+nothing here can be done on someone else's behalf):
+
+1. Enroll in the [Apple Developer Program](https://developer.apple.com/programs/enroll)
+   ($99/year). Individual enrollment is faster (identity verification only);
+   Organization enrollment additionally needs a D-U-N-S number and shows a
+   company name instead of a personal one on the certificate — worth it if
+   this becomes a real commercial release, not needed just to get signing
+   working.
+2. Generate a **Developer ID Application** certificate: Xcode → Settings →
+   Accounts → select your Apple ID → Manage Certificates → **+** → Developer
+   ID Application. This creates both the certificate and its private key in
+   your keychain — no separate download/import step.
+3. Find the exact identity string `codesign` expects:
+   `security find-identity -v -p codesigning` — it looks like
+   `"Developer ID Application: Your Name (ABCDE12345)"`, where `ABCDE12345`
+   is your Team ID.
+4. Generate an app-specific password at
+   [appleid.apple.com](https://appleid.apple.com) (Sign-In and Security →
+   App-Specific Passwords) — this is what authenticates `notarytool`, not
+   your real Apple ID password.
+5. Store notarization credentials once, in the keychain, under a name of
+   your choosing:
+   ```
+   xcrun notarytool store-credentials "utm-studio-notary" \
+     --apple-id "you@example.com" --team-id "ABCDE12345" \
+     --password "<the app-specific password>"
+   ```
+
+**Every release after that:**
+
+```bash
+SIGNING_IDENTITY="Developer ID Application: Your Name (ABCDE12345)" \
+NOTARY_PROFILE="utm-studio-notary" \
+./build_app.sh
+```
+
+This signs with the hardened runtime and a secure timestamp (both required
+for notarization to accept the signature at all — the ad-hoc path skips
+them since a `-` identity can't produce a valid one anyway), submits the
+app to Apple and waits for approval, staples the ticket, builds the `.dmg`
+(the `.app` plus an `Applications` symlink, via plain `hdiutil` — no extra
+dependency), then notarizes and staples the `.dmg` itself too. Both the app
+and the disk image need their own ticket: Gatekeeper checks the outer
+container once it's carried a quarantine flag from a browser download, not
+just the app inside it.
+
+Neither variable is required — leave both unset and the script behaves
+exactly as before (ad-hoc signed, `.dmg` still produced but not notarized).
+Distributing the result (e.g. attaching it to a GitHub Release matching the
+git tag) is a separate, later step once you actually have a signed build to
+publish.
+
 ## Why not auto-update
 
 Worth recording the reasoning, since "just add Sparkle" is the obvious next
