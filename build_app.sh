@@ -162,7 +162,12 @@ elif [ -n "$SIGNING_IDENTITY" ]; then
 fi
 
 echo "==> Creating disk image..."
-DMG_PATH="dist/${APP_NAME} - ${APP_VERSION}.dmg"
+# No spaces in the filename: GitHub Releases silently replaces every space
+# with a dot in an uploaded asset's filename (a server-side behavior, not
+# something the upload method controls), so "UTM Studio - 1.0.0.dmg" would
+# actually download as "UTM.Studio.-.1.0.0.dmg". Hyphens pass through
+# untouched.
+DMG_PATH="dist/${APP_NAME// /-}-${APP_VERSION}.dmg"
 rm -f "$DMG_PATH"
 DMG_STAGING="$(mktemp -d)/dmg"
 mkdir -p "$DMG_STAGING"
