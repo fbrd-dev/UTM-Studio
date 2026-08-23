@@ -137,16 +137,23 @@ notarize() {
   local target="$1"
   echo "==> Submitting $(basename "$target") for notarization (this can take a few minutes)..."
   xcrun notarytool submit "$target" --keychain-profile "$NOTARY_PROFILE" --wait
+}
+
+staple() {
+  local target="$1"
   echo "==> Stapling notarization ticket to $(basename "$target")..."
   xcrun stapler staple "$target"
 }
 
 if [ -n "$SIGNING_IDENTITY" ] && [ -n "$NOTARY_PROFILE" ]; then
   ZIP_PATH="$(mktemp -d)/${APP_NAME}.zip"
-  # notarytool only accepts a zip/dmg/pkg, not a raw .app — ditto's -c -k
-  # --keepParent preserves the bundle structure notarization needs to see.
+  # notarytool only accepts a zip/dmg/pkg, not a raw .app, so the app is
+  # zipped just to upload it — but a ticket can only be STAPLED onto the
+  # real .app/.dmg/.pkg, never onto that zip wrapper (stapler flatly
+  # refuses zip files), so the staple target here is $APP_DIR, not $ZIP_PATH.
   ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
   notarize "$ZIP_PATH"
+  staple "$APP_DIR"
   rm -f "$ZIP_PATH"
 elif [ -n "$SIGNING_IDENTITY" ]; then
   echo "==> SIGNING_IDENTITY set but NOTARY_PROFILE isn't — skipping notarization."
@@ -155,7 +162,7 @@ elif [ -n "$SIGNING_IDENTITY" ]; then
 fi
 
 echo "==> Creating disk image..."
-DMG_PATH="dist/${APP_NAME}-${APP_VERSION}.dmg"
+DMG_PATH="dist/${APP_NAME} - ${APP_VERSION}.dmg"
 rm -f "$DMG_PATH"
 DMG_STAGING="$(mktemp -d)/dmg"
 mkdir -p "$DMG_STAGING"
@@ -166,6 +173,7 @@ rm -rf "$(dirname "$DMG_STAGING")"
 
 if [ -n "$SIGNING_IDENTITY" ] && [ -n "$NOTARY_PROFILE" ]; then
   notarize "$DMG_PATH"
+  staple "$DMG_PATH"
 fi
 
 echo ""
