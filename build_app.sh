@@ -113,12 +113,23 @@ if [ -n "$SIGNING_IDENTITY" ]; then
   # are both required for notarization to accept the signature at all —
   # ad-hoc signing below skips them since a plain "-" identity can't
   # produce a valid secure timestamp anyway.
-  codesign --force --deep --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP_DIR"
+  #
+  # --entitlements is required here for a different reason: hardened
+  # runtime blocks sending Apple Events outright unless the app carries
+  # com.apple.security.automation.apple-events (UTMStudio.entitlements) —
+  # without it, utmctl's calls to control UTM fail instantly with "missing
+  # entitlement", and macOS never even shows the normal per-app "UTM Studio
+  # wants to control UTM" consent prompt for the user to approve.
+  codesign --force --deep --options runtime --timestamp --entitlements "UTMStudio.entitlements" --sign "$SIGNING_IDENTITY" "$APP_DIR"
 else
   echo "==> Ad-hoc signing (no SIGNING_IDENTITY set — this build will show"
   echo "    Gatekeeper warnings for anyone but you; see DEVELOPMENT.md for"
   echo "    real signing/notarization setup)..."
-  codesign --force --deep --sign - "$APP_DIR" 2>&1 | grep -v "replacing existing signature" || true
+  # Ad-hoc signing doesn't enable hardened runtime, so it isn't actually
+  # required here — applied anyway so a local dev build's entitlements
+  # match what actually ships, rather than differing in a way that could
+  # hide an entitlement problem until release.
+  codesign --force --deep --entitlements "UTMStudio.entitlements" --sign - "$APP_DIR" 2>&1 | grep -v "replacing existing signature" || true
 fi
 
 # Rebuilding at the same path repeatedly (same bundle ID, same location) can
