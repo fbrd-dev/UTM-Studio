@@ -22,6 +22,11 @@ without paying the disk cost of a full copy every time.
 - **A Master VM already set up in UTM**, using the QEMU backend (not Apple
   Virtualization), with a `.qcow2` disk. This is the VM UTM Studio clones
   clients from.
+- **Full Disk Access**, granted to UTM Studio in System Settings → Privacy
+  & Security → Full Disk Access. Locating VM files (for cloning a client's
+  disk, and for "Show in Finder") needs it — macOS never prompts for this
+  automatically, so UTM Studio asks you to grant it once, right after first
+  launch.
 
 ## Features
 

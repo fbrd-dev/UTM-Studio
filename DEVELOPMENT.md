@@ -272,6 +272,35 @@ copy — still correct, just not space-efficient, and slower.
   to reduce how often this happens; if it still shows up, moving the app to
   a new location (e.g. into `/Applications`) or `killall Finder` clears it.
 
+- **On a freshly installed Mac, VMs could look invisible, "New Client"
+  could fail, and "Show in Finder" said a VM couldn't be found — all from
+  one missing permission, granted late.** Locating a `.utm` bundle
+  (`CloneInspector.findBundlePath`, and `utm-client.sh`'s own `find_bundle`)
+  searches `~/Documents` and UTM.app's own sandboxed container
+  (`~/Library/Containers/com.utmapp.UTM`). The first is a normal
+  Documents-folder access request — macOS prompts for it automatically —
+  but reading *another app's* container needs **Full Disk Access**, a
+  category macOS never prompts for on its own; without it, the search
+  silently returns nothing, no popup, no error, just as if the VM weren't
+  there. Left alone, the very first thing to touch either location was
+  whatever real action the user happened to try first (often "New Client"),
+  so the permission prompt showed up confusingly deep inside a workflow
+  instead of at launch — and Full Disk Access never got asked for at all,
+  since there's nothing to auto-trigger. Ruled out as the cause first: a
+  hypothesis that a *space in the app's own install path*
+  (`/Applications/UTM Studio.app/...`) broke command execution — checked
+  every `Process` call (all use array-based `arguments`, not a shell
+  string) and every variable expansion in `utm-client.sh` (all quoted), and
+  confirmed live by running the script directly from its actual
+  space-containing path against real VMs — no issue found there. Fixed by
+  `AppViewModel.primeFileAccessPermissionsOnce()`: touches `~/Documents` at
+  first launch ever (triggers that prompt immediately instead of later),
+  and unconditionally shows a one-time `NSAlert` explaining Full Disk
+  Access with a button straight to that System Settings pane, since there's
+  no API to check whether it's already granted. Settings also has a
+  permanent "Open Full Disk Access Settings…" button for revisiting this
+  after dismissing the one-time prompt.
+
 ## Notes / caveats carried over from the script
 
 - Master should be stopped when a client's disk is refreshed (link/relink/

@@ -35,6 +35,7 @@ final class AppViewModel: ObservableObject {
         self.settings = settings
         observeAppActivation()
         startUpdateChecking()
+        primeFileAccessPermissionsOnce()
     }
 
     deinit {
@@ -174,6 +175,51 @@ final class AppViewModel: ObservableObject {
         alert.addButton(withTitle: "OK")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    // MARK: - First-launch permission priming
+
+    /// Locating a VM's .utm bundle (for cloning a client's disk, and for
+    /// "Show in Finder") means searching ~/Documents and UTM's own
+    /// sandboxed container — left alone, macOS only asks for access to
+    /// either the first time some real action actually touches them, which
+    /// otherwise looks exactly like that action silently failed with no
+    /// explanation. Do that touching right at first launch instead, once
+    /// ever, so both prompts are out of the way before they'd be confusing.
+    private func primeFileAccessPermissionsOnce() {
+        let key = "hasPrimedFileAccessPermissions"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+
+        Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            let home = NSHomeDirectory()
+            // Triggers macOS's standard, auto-shown "would like to access
+            // files in your Documents folder" prompt immediately, if this
+            // Mac hasn't already answered it for this app.
+            _ = try? fm.contentsOfDirectory(atPath: "\(home)/Documents")
+            await MainActor.run { Self.presentFullDiskAccessNotice() }
+        }
+    }
+
+    /// Unlike Documents above, reading another app's sandboxed container
+    /// (~/Library/Containers/com.utmapp.UTM, where UTM itself usually keeps
+    /// VM bundles) needs Full Disk Access — a category macOS never prompts
+    /// for on its own. There's no reliable way to detect whether it's
+    /// already granted from inside the app, so this is shown once,
+    /// unconditionally, rather than risk staying silent for a setup that
+    /// actually needs it.
+    private static func presentFullDiskAccessNotice() {
+        let alert = NSAlert()
+        alert.messageText = "One-time setup: Full Disk Access"
+        alert.informativeText = "UTM Studio finds VM files by searching your Documents folder and UTM's own app data — cloning a client's disk, and \"Show in Finder\", both depend on it. If a VM ever can't be found once you're using the app, grant Full Disk Access here.\n\nSystem Settings → Privacy & Security → Full Disk Access → enable UTM Studio."
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // MARK: - Logging

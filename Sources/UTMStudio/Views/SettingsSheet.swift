@@ -73,6 +73,19 @@ struct SettingsSheet: View {
                 }
 
                 Section {
+                    Button("Open Full Disk Access Settings…") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    Text("Needed to locate VM files for cloning a client's disk and for \"Show in Finder\" — macOS never prompts for this on its own, so if a VM can't be found, check that UTM Studio is enabled here.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Permissions").font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section {
                     Toggle("Auto-refresh", isOn: $settings.autoRefreshEnabled)
                         .onChange(of: settings.autoRefreshEnabled) { _, _ in
                             vm.startPolling()
